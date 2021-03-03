@@ -1,7 +1,4 @@
 buildscript {
-    repositories {
-        jcenter()
-    }
     dependencies {
         classpath "com.github.jengelman.gradle.plugins:shadow:5.2.0"
     }
@@ -9,7 +6,7 @@ buildscript {
 
 plugins {
     id 'java'
-    id 'org.jetbrains.kotlin.jvm' version '1.4.21'
+    id 'org.jetbrains.kotlin.jvm' version '1.4.31' // 确保添加 Kotlin
     id 'com.github.johnrengelman.shadow' version '5.2.0'
 }
 
@@ -25,9 +22,10 @@ repositories {
 }
 
 dependencies {
-    implementation "net.mamoe:mirai-core-all:2.0-M1-1"
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
-    testCompile group: "junit", name: "junit", version: "4.12"
+    def miraiVersion = "2.5-M1"
+    // 开发时使用 mirai-core-api，运行时提供 mirai-core
+    api("net.mamoe:mirai-core-api:" + miraiVersion) // 编译代码使用
+    runtimeOnly("net.mamoe:mirai-core:" + miraiVersion) // 运行时使用
 }
 
 compileKotlin {
@@ -39,10 +37,15 @@ compileTestKotlin {
 }
 
 shadowJar {
+    archiveVersion.set("")
+    archiveClassifier.set("")
     manifest {
         attributes(
-            "Main-Class": "io.github.tenshitmirai.MyLoader"
+            "Main-Class": "io.github.salenzo.tenshitmirai.MyLoader"
         )
+    }
+    minimize() {
+        exclude(dependency("net.mamoe:mirai-core:.*"))
     }
     // 打包一切源文件！
     from("./") {
@@ -50,7 +53,7 @@ shadowJar {
         include "settings.gradle"
     }
     // 我写的源文件只有这一个，真是太便利了。
-    from("./src/main/kotlin/io/github/tenshitmirai/") {
+    from("./src/main/kotlin/io/github/salenzo/tenshitmirai/") {
         include "MyLoader.kt"
     }
 }

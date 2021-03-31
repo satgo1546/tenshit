@@ -28,23 +28,71 @@ import kotlin.system.exitProcess
 class MyLoader {
 	@Suppress("RemoveCurlyBracesFromTemplate")
 	companion object {
-		const val revision = 14
+		const val revision = 15
 		val seqSqr = ReentrantLock()
 		var exp: Pattern = Pattern.compile("Tenshit")
 		val emptyIntArray = IntArray(0)
+		@Suppress("unused")
 		fun inspect(s: String): String {
 			var r = s
 			r = r.replace("\\", "\\\\")
-			r = r.replace("\u001b", "\\e")
-			r = r.replace("\u0007", "\\a")
-			r = r.replace("\b", "\\b")
-			r = r.replace("\t", "\\t")
-			r = r.replace("\u000c", "\\f")
-			r = r.replace("\u000b", "\\v")
 			r = r.replace("\"", "\\\"")
 			r = r.replace("\n", "\\n")
+			r = r.replace("\t", "\\t")
 			r = r.replace("\r", "\\r")
+			r = r.replace("\b", "\\b")
+			r = r.replace("\u000b", "\\v")
+			r = r.replace("\u000c", "\\f")
+			r = r.replace("\u0007", "\\a")
+			r = r.replace("\u001b", "\\e")
 			return "\"${r}\""
+		}
+		@MiraiExperimentalApi
+		fun buildMessageString(m: MessageChain): String {
+			val sb = StringBuilder()
+			run {
+				m.forEach {
+					when (it) {
+						is PlainText -> sb.append(it.content)
+						is Face -> sb.append("\u001b<Emoticon ${it.id}>")
+						is At -> sb.append("\u001b<Mention ${it.target}>${it.content}")
+						is AtAll -> sb.append("\u001b<Mention everyone>")
+						is LightApp -> {
+							sb.clear()
+							sb.append("\u001b<Rich message::Xiaochengxu>")
+							sb.append(it.content)
+							return@run
+						}
+						is SimpleServiceMessage -> {
+							sb.clear()
+							sb.append("\u001b<Rich message::Service ${if (it.serviceId == 60) "XML" else "JSON"}>")
+							sb.append(it.content)
+							return@run
+						}
+						is QuoteReply -> {
+							sb.append("\u001b<Begin quote ${it.source.ids.joinToString(",")}>")
+							sb.append(it.source.originalMessage.content)
+							sb.append("\u001b<End>")
+						}
+						is ForwardMessage -> {
+							// 此接口尚未完全确定，建议用户暂时不要识别Begin scope
+							var firstNode = true
+							sb.append("\u001b<Begin scope>${it.title}\n")
+							it.nodeList.forEach {
+								if (firstNode) {
+									firstNode = false
+								} else {
+									sb.append("\u001b<Send>")
+								}
+								sb.append("${it.senderId}\n${it.senderName}\n${it.time}\n${buildMessageString(it.messageChain)}")
+							}
+							sb.append("\u001b<End>")
+						}
+						else -> sb.append(it.content)
+					}
+				}
+			}
+			return sb.toString()
 		}
 		fun runaux(): Int {
 			val pb = if (System.getProperty("os.name").toLowerCase().contains("win")) {
@@ -131,7 +179,7 @@ class MyLoader {
 				miraiBot.alsoLogin()
 				println("Thank goodness, I am alive.")
 				GlobalEventChannel.subscribeAlways<MessageEvent>  {
-					val subject = it.subject
+					val subject = this.subject
 					val context = when (subject) {
 						is User -> subject.nick
 						is Friend -> subject.nick
@@ -139,33 +187,10 @@ class MyLoader {
 						is Member -> subject.nameCardOrNick
 						else -> ""
 					}
-					val sb = StringBuilder()
-					it.message.forEach {
-						when (it) {
-							is PlainText -> sb.append(it.content)
-							is Face -> sb.append("\u001b<Face ${it.id}>")
-							is At -> sb.append("\u001b<Mention ${it.target}>${it.content}")
-							is AtAll -> sb.append("\u001b<Mention everyone>")
-							is QuoteReply -> {
-								sb.append("\u001b<Begin quote ${it.source.ids.joinToString(",")}>")
-								sb.append(it.source.originalMessage.content)
-								sb.append("\u001b<End>")
-							}
-							is ForwardMessage -> {
-								// 此接口尚未完全确定，建议用户暂时不要识别Begin child
-								sb.append("\u001b<Begin child>\n")
-								it.nodeList.forEach {
-									sb.append("${it.senderId},${inspect(it.senderName)},${it.time},${inspect(it.messageChain.content)}\n")
-								}
-								sb.append("\u001b<End>")
-							}
-							else -> sb.append(it.content)
-						}
-					}
-					auxEvent(it.sender, subject, it.source, it.sender.id, it.senderName, subject.id, context, it.time.toLong(), it.source.ids, sb.toString())
+					auxEvent(this.sender, subject, this.source, this.sender.id, this.senderName, subject.id, context, this.time.toLong(), this.source.ids, buildMessageString(this.message))
 				}
 				GlobalEventChannel.subscribeAlways<NudgeEvent> {
-					val from = it.from
+					val from = this.from
 					if (from !is User) return@subscribeAlways // from is Bot
 					var subject: Contact = from
 					if (subject is Member) subject = subject.group
@@ -174,60 +199,67 @@ class MyLoader {
 						is Group -> subject.name
 						else -> ""
 					}
-					auxEvent(from, subject, null, from.id, from.nameCardOrNick, subject.id, context, 0, emptyIntArray, "\u001b<Nudge>\n${it.action}\n${it.suffix}")
+					auxEvent(from, subject, null, from.id, from.nameCardOrNick, subject.id, context, 0, emptyIntArray, "\u001b<Nudge>\n${this.action}\n${this.suffix}")
 				}
 				GlobalEventChannel.subscribeAlways<BotMuteEvent> {
-					auxEvent(it.operator, it.group, null, it.operator.id, it.operator.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Mute ${it.durationSeconds}>")
+					auxEvent(this.group.botAsMember, this.group, null, this.bot.id, this.group.botAsMember.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Mute ${this.durationSeconds}>${this.operator.id}\n${this.operator.nameCardOrNick}")
 				}
 				GlobalEventChannel.subscribeAlways<BotUnmuteEvent> {
-					auxEvent(it.operator, it.group, null, it.operator.id, it.operator.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Unmute>")
+					auxEvent(this.group.botAsMember, this.group, null, this.bot.id, this.group.botAsMember.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Unmute>${this.operator.id}\n${this.operator.nameCardOrNick}")
+				}
+				GlobalEventChannel.subscribeAlways<MemberMuteEvent> {
+					auxEvent(this.member, this.group, null, this.member.id, this.member.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Mute ${this.durationSeconds}>${this.operatorOrBot.id}\n${this.operatorOrBot.nameCardOrNick}")
+				}
+				GlobalEventChannel.subscribeAlways<MemberUnmuteEvent> {
+					auxEvent(this.member, this.group, null, this.member.id, this.member.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Unmute>${this.operatorOrBot.id}\n${this.operatorOrBot.nameCardOrNick}")
 				}
 				GlobalEventChannel.subscribeAlways<MemberJoinEvent> {
-					auxEvent(it.member, it.group, null, it.member.id, it.member.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Member join>")
+					auxEvent(this.member, this.group, null, this.member.id, this.member.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Member join>")
 				}
 				GlobalEventChannel.subscribeAlways<MemberLeaveEvent> {
-					auxEvent(it.member, it.group, null, it.member.id, it.member.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Member quit>")
+					auxEvent(this.member, this.group, null, this.member.id, this.member.nameCardOrNick, this.groupId, this.group.name, 0, emptyIntArray, "\u001b<Member quit>")
 				}
 				GlobalEventChannel.subscribeAlways<GroupNameChangeEvent> {
-					auxEvent(it.operatorOrBot, it.group, null, it.operator?.id ?: 0L, it.operator?.nameCardOrNick ?: "", it.group.id, it.origin, 0, emptyIntArray, "\u001b<Group name change>${it.new}")
+					println("GroupNameChangeEvent. For debugging purposes:")
+					println(this.origin)
+					println(this.new)
+					auxEvent(this.operatorOrBot, this.group, null, this.operator?.id ?: 0L, this.operator?.nameCardOrNick ?: "", this.group.id, this.origin, 0, emptyIntArray, "\u001b<Group name change>${this.new}")
 				}
 				GlobalEventChannel.subscribeAlways<BotJoinGroupEvent> {
-					auxEvent(it.group.botAsMember, it.group, null, 0L, "", it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Join>")
+					auxEvent(this.group.botAsMember, this.group, null, 0L, "", this.group.id, this.group.name, 0, emptyIntArray, "\u001b<Join>")
 				}
 				GlobalEventChannel.subscribeAlways<BotOnlineEvent> {
-					auxEvent(it.bot.asFriend, it.bot.asFriend, null, it.bot.id, it.bot.nick, it.bot.id, it.bot.nick, 0, emptyIntArray, "\u001b<Online>")
+					auxEvent(this.bot.asFriend, this.bot.asFriend, null, this.bot.id, this.bot.nick, this.bot.id, this.bot.nick, 0, emptyIntArray, "\u001b<Online>")
 				}
 				GlobalEventChannel.subscribeAlways<BotOfflineEvent> {
-					auxEvent(it.bot.asFriend, it.bot.asFriend, null, it.bot.id, it.bot.nick, it.bot.id, it.bot.nick, 0, emptyIntArray, "\u001b<Offline>")
+					auxEvent(this.bot.asFriend, this.bot.asFriend, null, this.bot.id, this.bot.nick, this.bot.id, this.bot.nick, 0, emptyIntArray, "\u001b<Offline>")
+				}
+				GlobalEventChannel.subscribeAlways<BotReloginEvent> {
+					auxEvent(this.bot.asFriend, this.bot.asFriend, null, this.bot.id, this.bot.nick, this.bot.id, this.bot.nick, 0, emptyIntArray, "\u001b<Relogin>${this.cause?.message}\n${this.cause?.localizedMessage}")
 				}
 				GlobalEventChannel.subscribeAlways<MessageRecallEvent.FriendRecall> {
-					val friend = it.operator
-					auxEvent(friend, friend, null, it.operatorId, friend.nick, it.operatorId, friend.nick, 0, it.messageIds, "\u001b<Delete>")
+					val friend = this.operator
+					auxEvent(friend, friend, null, this.operatorId, friend.nick, this.operatorId, friend.nick, 0, this.messageIds, "\u001b<Delete>")
 				}
 				GlobalEventChannel.subscribeAlways<MessageRecallEvent.GroupRecall> {
-					auxEvent(it.operatorOrBot, it.group, null, it.operatorOrBot.id, it.operatorOrBot.nameCardOrNick, it.group.id, it.group.name, 0, it.messageIds, "\u001b<Delete>")
+					auxEvent(this.operatorOrBot, this.group, null, this.operatorOrBot.id, this.operatorOrBot.nameCardOrNick, this.group.id, this.group.name, 0, this.messageIds, "\u001b<Delete>")
 				}
 				GlobalEventChannel.subscribeAlways<ImageUploadEvent.Failed> {
 					try {
-						it.target.sendMessage("\u267b\ufe0f ImageUploadEvent.Failed: ${it.message} (${it.errno})")
+						this.target.sendMessage("\u267b\ufe0f ImageUploadEvent.Failed: ${this.message} (${this.errno})")
 					} catch (e: Throwable) {
 					}
 				}
-				GlobalEventChannel.subscribeAlways<BotReloginEvent> {
-					auxEvent(it.bot.asFriend, it.bot.asFriend, null, it.bot.id, it.bot.nick, it.bot.id, it.bot.nick, 0, emptyIntArray, "\u001b<Relogin>${it.cause?.message}\n${it.cause?.localizedMessage}")
-				}
 				GlobalEventChannel.subscribeAlways<MemberSpecialTitleChangeEvent> {
-					auxEvent(it.member, it.group, null, it.member.id, it.member.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Member badge>${it.origin}\n${it.new}")
+					auxEvent(this.member, this.group, null, this.member.id, this.member.nameCardOrNick, this.group.id, this.group.name, 0, emptyIntArray, "\u001b<Member badge>${this.origin}\n${this.new}")
 				}
 				GlobalEventChannel.subscribeAlways<FriendAvatarChangedEvent> {
-					auxEvent(it.friend, it.friend, null, it.friend.id, it.friend.nick, it.friend.id, it.friend.nick, 0, emptyIntArray, "\u001b<Friend avatar>${it.friend.avatarUrl}")
+					auxEvent(this.friend, this.friend, null, this.friend.id, this.friend.nick, this.friend.id, this.friend.nick, 0, emptyIntArray, "\u001b<Friend avatar>${this.friend.avatarUrl}")
 				}
-				GlobalEventChannel.subscribeAlways<MemberHonorChangeEvent> {
-					if (it.honorType == GroupHonorType.TALKATIVE) {
-						val rawData = Mirai.getRawGroupHonorListData(it.bot, it.group.id, GroupHonorType.TALKATIVE)
-						val dayCount = rawData?.currentTalkative?.dayCount ?: 0
-						auxEvent(it.member, it.group, null, it.member.id, it.member.nameCardOrNick, it.group.id, it.group.name, 0, emptyIntArray, "\u001b<Longwang ${dayCount}>")
-					}
+				GlobalEventChannel.subscribeAlways<GroupTalkativeChangeEvent> {
+					val rawData = Mirai.getRawGroupHonorListData(this.bot, this.group.id, GroupHonorType.TALKATIVE)
+					val dayCount = rawData?.currentTalkative?.dayCount ?: 0
+					auxEvent(this.now, this.group, null, this.now.id, this.now.nameCardOrNick, this.group.id, this.group.name, 0, emptyIntArray, "\u001b<Longwang ${dayCount}>")
 				}
 				GlobalScope.launch {
 					println("Yet another coroutine has been started as expected. What would happen?")
@@ -258,6 +290,22 @@ class MyLoader {
 										}
 										auxEvent(sender, sender, null, it.absoluteValue, context, it.absoluteValue, context, 0, emptyIntArray, "\u001b<Periodic event>")
 										delay(114)
+									}
+								}
+							}
+							if (protocol != BotConfiguration.MiraiProtocol.ANDROID_PHONE) {
+								val trigger1 = Calendar.getInstance().get(Calendar.HOUR_OF_DAY) == 12 && Calendar.getInstance().get(Calendar.MINUTE) == 0
+								val trigger2 = File("tenshit-trigger").exists()
+								if (trigger1 || trigger2) {
+									println("The async coroutine is checking longwang...")
+									for (group in miraiBot.groups) {
+										println("...for group ${group.id}.")
+										val rawData = Mirai.getRawGroupHonorListData(miraiBot, group.id, GroupHonorType.TALKATIVE)
+										rawData?.currentTalkative?.let {
+											val dayCount = it.dayCount
+											auxEvent(group.botAsMember, group, null, it.uin ?: 0,it.nick ?: "", group.id, group.name, 0, emptyIntArray, "\u001b<Longwang ${dayCount}>")
+										}
+										delay(5140)
 									}
 								}
 							}
@@ -351,6 +399,8 @@ class MyLoader {
 								val target = if (targetId == null) sender else context.getMember(targetId)
 								if (target != null) {
 									msg += At(target)
+								} else {
+									println("A <Mention ...> in the following message to be sent is ignored, because such a member does not exist.")
 								}
 							} else if (str.startsWith("\u001b<Quote>")) {
 								if (msgSrc != null) {
@@ -361,35 +411,45 @@ class MyLoader {
 								val contents = str.substring(str.indexOf(">") + 1, str.indexOf("\u001b<End>"))
 								str = str.substring(str.indexOf("\u001b<End>"))
 								if (msgSrc != null) {
-									if (msgSrc.ids.contentEquals(ids)) {
-										println("Good. The supplied ids in <Begin quote ...> matches the message. (Otherwise it is not supported for the time being.)")
-									}
 									val newMsgSrc = msgSrc.copyAmend {
-										originalMessage = contents.toPlainText().toMessageChain()
+										this.originalMessage = contents.toPlainText().toMessageChain()
+										if (!this.ids.contentEquals(ids)) {
+											println("Not very good. The supplied ids in <Begin quote ...> doesn't match the message. This is not supported for the time being.")
+											this.internalIds = IntArray(ids.size) { 0 }
+											this.time = (System.currentTimeMillis() / 1000).toInt()
+										}
+										this.ids = ids
 									}
-									println(ids)
-									println(contents)
-									println(str)
-									println(newMsgSrc.toString())
 									msg += QuoteReply(newMsgSrc)
 								}
 							} else if (str.startsWith("\u001b<Rich message::Xiaochengxu>")) {
-								msg = LightApp(str.substring(28)).toMessageChain()
+								msg = LightApp(str.substring(28))
 								str = ""
 							} else if (str.startsWith("\u001b<Rich message::Service JSON>")) {
-								msg = SimpleServiceMessage(1, str.substring(29)).toMessageChain()
+								msg = SimpleServiceMessage(1, str.substring(29))
 								str = ""
 							} else if (str.startsWith("\u001b<Rich message::Service XML>")) {
-								msg = SimpleServiceMessage(60, str.substring(28)).toMessageChain()
+								msg = SimpleServiceMessage(60, str.substring(28))
 								str = ""
-							} else if (str.startsWith("\u001b<Face ")) {
-								val face = str.substring(7, str.indexOf(">"))
+							} else if (str.startsWith("\u001b<Begin scope>")) {
+								str = str.substring(14)
+								MyDisplayStrategy.title = str.substring(0, str.indexOf("\n"))
+								str = str.substring(str.indexOf("\n"))
+								msg = buildForwardMessage(context) {
+									this.displayStrategy = MyDisplayStrategy
+									100200300 named "鸽子 C" at 1582315452 says "咕咕咕"
+								}
+								str = ""
+							} else if (str.startsWith("\u001b<Emoticon ")) {
+								val face = str.substring(11, str.indexOf(">"))
 								var faceId = face.toIntOrNull() ?: MyFaceName.names.indexOfFirst { it == face }
 								if (faceId < 0) faceId = MyFaceName.names.indexOfFirst { it == "[${face}]" }
 								if (faceId < 0) faceId = Face.KA_FEI
 								msg += Face(faceId)
-							} else if (str.startsWith("\u001b<Dice>")) {
-								msg += Dice.random()
+							} else if (str.startsWith("\u001b<Sticker::Dice ")) {
+								str.substring(16, str.indexOf(">")).toIntOrNull()?.let {
+									msg += Dice((it - 1) % 6 + 1)
+								}
 							}
 							str = when (str.indexOf(">")) {
 								-1 -> ""
@@ -644,5 +704,13 @@ object MyFaceName {
 		names[Face.O] = "[哦]"
 		names[Face.QING] = "[请]"
 		names[Face.ZHENG_YAN] = "[睁眼]"
+	}
+}
+
+object MyDisplayStrategy: ForwardMessage.DisplayStrategy {
+	var title = ""
+	@MiraiExperimentalApi
+	override fun generateTitle(forward: RawForwardMessage): String {
+		return title
 	}
 }

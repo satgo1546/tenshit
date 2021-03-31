@@ -22,7 +22,7 @@ repositories {
 }
 
 dependencies {
-    def miraiVersion = "2.5-M1"
+    def miraiVersion = "2.6-M1"
     // 开发时使用 mirai-core-api，运行时提供 mirai-core
     api("net.mamoe:mirai-core-api:" + miraiVersion) // 编译代码使用
     runtimeOnly("net.mamoe:mirai-core:" + miraiVersion) // 运行时使用
@@ -30,10 +30,7 @@ dependencies {
 
 compileKotlin {
     kotlinOptions.jvmTarget = "1.8"
-}
-
-compileTestKotlin {
-    kotlinOptions.jvmTarget = "1.8"
+    kotlinOptions.freeCompilerArgs = ["-Xjvm-default=compatibility"]
 }
 
 shadowJar {
@@ -44,7 +41,7 @@ shadowJar {
             "Main-Class": "io.github.salenzo.tenshitmirai.MyLoader"
         )
     }
-    minimize() {
+    minimize {
         exclude(dependency("net.mamoe:mirai-core:.*"))
     }
     // 打包一切源文件！

@@ -1,5 +1,38 @@
+// TenshitMirai
+
+// Copyright © 2020–2022 Frog Chen
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+// Rev. 13
+// - 升级到Mirai 2.0-M1-1、Kotlin 1.4.21。
+// - tenshit-input.txt中支持Online、Offline、Relogin、群成员头衔变更、好友头像变更。
+// - tenshit-output.txt中支持更复杂的标记，如行内提及。
+
+// Rev. 14
+// - 升级到Mirai 2.5-M1、Kotlin 1.4.31。
+// - tenshit-output.txt中支持提及任意群成员、引用回复、骰子。
+// - tenshit-input.txt的格式与tenshit-output.txt更加统一，如由[咖啡]改为ESC<Face 60>。
+// - 主程序包名由io.github.tenshitmirai.MyLoader改为io.github.salenzo.tenshitmirai.MyLoader。
+
+// Rev. 15
+// - 升级到Mirai 2.6-M1。
+// - tenshit-input.txt中支持Mute、Unmute、引用回复、合并转发。
+// - tenshit-output.txt中支持老千骰子。
+
 // Rev. 16
-// - 升级到Mirai 2.10.0、Shadow 7.1.2。
+// - 升级到Mirai 2.10.0、Kotlin 1.6.10、Shadow 7.1.2。
 // - tenshit-settings.txt增加到5行：可设置心跳策略，协议改用字符串表示。
 // - tenshit-input.txt中支持Resource::Image、Resource::Sticker、Resource::Audio、非骰子的Sticker。
 // - tenshit-output.txt中支持非骰子的Sticker。
@@ -8,6 +41,12 @@
 // - tenshit-input.txt和tenshit-output.txt中戳一戳动作的词汇由Nudge改为Poke。
 // - 借助mirai-silk-converter（需要FFmpeg）支持WAV、MP3、OGG、FLAC、Opus等各种音频格式作为语音消息发送到好友和群。
 // - 清理代码，构建脚本由Groovy DSL改为Kotlin DSL，减少class、var、硬编码索引substring的使用，不再设定独立应用程序不必要的包名。
+
+// Rev. 17
+// - tenshit-settings.txt增加到6行：可设置自动接受好友申请。
+// - tenshit-input.txt中支持Poke目标。
+// - tenshit-output.txt中支持Context change、Poke特定用户。
+// - 修正tenshit-input.txt中时间戳时区异常。
 
 import kotlinx.coroutines.*
 import net.mamoe.mirai.BotFactory
@@ -33,13 +72,12 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
-import java.util.regex.Pattern
 import kotlin.random.Random
 import kotlin.system.exitProcess
 
-const val revision = 16
+const val revision = 17
 val seqSqr = ReentrantLock()
-var exp: Pattern = Pattern.compile("Tenshit")
+var exp = Regex("Tenshit")
 
 @Suppress("unused")
 fun inspect(s: String): String {
@@ -54,18 +92,6 @@ fun inspect(s: String): String {
 		.replace("\u0007", "\\a")
 		.replace("\u001b", "\\e")
 	return "\"${r}\""
-}
-
-data class D2D2D(
-	val initId: Int,
-	val initName: String,
-) : MarketFace {
-	override val name: String
-		get() = initName
-
-	@MiraiExperimentalApi
-	override val id: Int
-		get() = initId
 }
 
 // 服务消息支持是实验性的。
@@ -152,7 +178,7 @@ fun runaux(): Int {
 	pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
 	pb.redirectError(ProcessBuilder.Redirect.INHERIT)
 	val p = pb.start()
-	if (!p.waitFor(4000 + revision.toLong(), TimeUnit.MILLISECONDS)) return 2147483647
+	if (!p.waitFor(4000 + revision.toLong(), TimeUnit.MILLISECONDS)) return Int.MAX_VALUE
 	return p.exitValue()
 }
 
@@ -177,6 +203,7 @@ fun main() {
 	var protocolId = ""
 	var hbStrategy = ""
 	var i = 0
+	var friendRequestAnswer = Regex("^114514$")
 	if (!File("tenshit-settings.txt").exists()) {
 		println("I find no tenshit-settings.txt. I need it to log into your account.")
 		println("The first line in the file is the QQ ID number.")
@@ -184,6 +211,7 @@ fun main() {
 		println("The third line is a protocol like ANDROID_PHONE.")
 		println("The fourth line is a heartbeat strategy like STAT_HB.")
 		println("The fifth line is a Java regular expression. Only messages that match it will be passed to tenshitaux.")
+		println("The sixth line is a Java regular expression. A friend request will be accepted only if the message matches it.")
 		exitProcess(1)
 	}
 	File("tenshit-settings.txt").forEachLine(Charsets.UTF_8) {
@@ -193,10 +221,11 @@ fun main() {
 			2 -> password = it.trim()
 			3 -> protocolId = it.trim()
 			4 -> hbStrategy = it.trim()
-			5 -> exp = Pattern.compile(it.trim())
+			5 -> exp = Regex(it.trim())
+			6 -> friendRequestAnswer = Regex(it.trim())
 		}
 	}
-	if (i < 5) {
+	if (i < 6) {
 		println("Missing configuration items.")
 		exitProcess(1)
 	}
@@ -225,7 +254,7 @@ fun main() {
 			val from = this.from
 			if (from !is User) return@subscribeAlways // from is Bot
 			val subject: Contact = if (from is Member) from.group else from
-			auxEvent(from, subject, "\u001b<Poke>\n${this.action}\n${this.suffix}")
+			auxEvent(from, subject, "\u001b<Poke ${target.id}>\n${action}\n${suffix}")
 		}
 		GlobalEventChannel.subscribeAlways<BotMuteEvent> {
 			auxEvent(group.botAsMember, group, "\u001b<Mute ${durationSeconds}>${operator.id}\n${operator.nameCardOrNick}")
@@ -279,6 +308,17 @@ fun main() {
 		GlobalEventChannel.subscribeAlways<MemberSpecialTitleChangeEvent> {
 			auxEvent(member, group, "\u001b<Member badge>${origin}\n${new}")
 		}
+		GlobalEventChannel.subscribeAlways<NewFriendRequestEvent> {
+			print("NewFriendRequestEvent: ${inspect(message)}, ")
+			delay(514)
+			// 希望可以将好友验证问题作为消息对接到aux程序去，但是回复模型和正常消息不同，不太好做。
+			if (friendRequestAnswer.containsMatchIn(message)) {
+				accept()
+				println("accepted.")
+			} else {
+				println("suspended.")
+			}
+		}
 		GlobalEventChannel.subscribeAlways<FriendAvatarChangedEvent> {
 			auxEvent(friend, friend, "\u001b<Friend avatar>${friend.avatarUrl}")
 		}
@@ -292,23 +332,17 @@ fun main() {
 			while (true) {
 				delay(49000)
 				try {
-					print("The coroutine says it's " + SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.US).format(Date()))
-					if (miraiBot.isOnline) {
-						println(" and I am still alive.")
-					} else {
-						println(" and what the hell?")
+					if (!miraiBot.isOnline) {
+						val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", Locale.US).format(Date())
+						println("The coroutine says it's $now and what the hell?")
 						delay(7456)
 						continue
 					}
 					File(".").listFiles()?.forEach { file ->
 						if (file.name.startsWith("tenshit-periodic-")) {
 							file.nameWithoutExtension.substringAfter("periodic-").toLongOrNull()?.let {
-								println("The async coroutine is dealing with periodic event ${it}.")
-								val sender = if (it < 0) miraiBot.getGroup(-it) else miraiBot.getFriend(it)
-								if (sender == null) {
-									println("The async coroutine failed to find ${it}.")
-									return@let
-								}
+								// The async coroutine is dealing with periodic event ${it}.
+								val sender = (if (it < 0) miraiBot.getGroup(-it) else miraiBot.getFriend(it)) ?: return@let
 								auxEvent(sender, sender, "\u001b<Periodic event>")
 								delay(114)
 							}
@@ -316,9 +350,9 @@ fun main() {
 					}
 					if (Calendar.getInstance().get(Calendar.HOUR_OF_DAY) == 12 && Calendar.getInstance().get(Calendar.MINUTE) == 0
 						|| File("tenshit-trigger").exists()) {
-						println("The async coroutine is checking longwang...")
+						// The async coroutine is checking longwang...
 						for (group in miraiBot.groups) {
-							println("...for group ${group.id}.")
+							// ...for group ${group.id}.
 							val rawData = Mirai.getRawGroupHonorListData(miraiBot, group.id, GroupHonorType.TALKATIVE)?.currentTalkative
 							if (rawData?.uin == null || rawData.dayCount == null) continue
 							val member = group[rawData.uin!!] ?: continue
@@ -348,7 +382,7 @@ suspend fun auxEvent(
 	// 返回代数ID（正为用户，负为群）和名称（有群名片则用群名片）。
 	fun contactInfo(contact: Contact?): Pair<Long, String> {
 		return Pair(if (contact is Group) -contact.id else contact?.id ?: 0L, when (contact) {
-			is User ->contact.nameCardOrNick
+			is User -> contact.nameCardOrNick
 			is Group -> contact.name
 			else -> ""
 		})
@@ -358,12 +392,12 @@ suspend fun auxEvent(
 		val (algebraicSenderId, senderName) = contactInfo(sender)
 		val (algebraicContextId, contextName) = contactInfo(context)
 		// 转换服务器时间（UTC+8）到协调世界时。
-		val time = (messageSource?.time ?: 0) - TimeUnit.HOURS.toSeconds(8)
+		val time = messageSource?.time?.let { it + TimeUnit.HOURS.toSeconds(8) } ?: 0
 		val header = "${algebraicSenderId}\n${senderName}\n" +
 			"${algebraicContextId}\n${contextNameOverride ?: contextName}\n" +
 			"${time}\n" +
 			"${messageIds.joinToString(",")}\n"
-		if (!exp.matcher(message).find()) return
+		if (!exp.containsMatchIn(message)) return
 		replyOne(sender, context, messageSource, header, askaux(header + message))
 	} catch (e: Throwable) {
 		try {
@@ -380,7 +414,8 @@ suspend fun auxEvent(
 }
 
 @MiraiExperimentalApi
-suspend fun replyOne(sender: Contact, context: Contact, msgSrc: MessageSource?, x: String, text: String) {
+suspend fun replyOne(sender: Contact, ctx: Contact, messageSource: MessageSource?, x: String, text: String) {
+	var context = ctx
 	// 此中Int为类型：1表图片，2表语音。
 	val resourceTypeFilenameList = mutableListOf<Pair<Int, String>>()
 	val fs = FileSystems.getDefault()
@@ -400,113 +435,46 @@ suspend fun replyOne(sender: Contact, context: Contact, msgSrc: MessageSource?, 
 	}
 	for (str in text.split('\u001e')) {
 		if (str.startsWith("\u001b<Callback after ")) {
-			str.substring(17, str.length - 1).toLongOrNull()?.let {
+			str.substringBefore('>').substringAfter("after ").toLongOrNull()?.let {
 				println("Now scheduling a ${it}ms timer.")
 				delay(it)
 				println("The timer gets fired.")
-				replyOne(sender, context, msgSrc, x, askaux("$x\u001b<Callback>"))
+				replyOne(sender, context, messageSource, x, askaux("$x\u001b<Callback>"))
 			}
-		} else if (str == "\u001b<Poke sender>") {
-			if (sender is User) {
-				try {
-					sender.nudge().sendTo(context)
-					println("Nudged ${sender.id} successfully.")
-				} catch (e: Throwable) {
-					replyOne(sender, context, msgSrc, x, askaux("$x\u001b<Poke failure>"))
-				}
-			}
-		} else if (str == "\u001b<To ") {
-			// TODO
-			throw NotImplementedError()
-		} else if (str.isNotEmpty()) {
-			@Suppress("NAME_SHADOWING")
-			var str = str.replace("\u001b<Revision>", revision.toString(), false)
-			var msg: Message = EmptyMessageChain
-			while (true) {
-				val escapeIndex = str.indexOf("\u001b<")
-				if (escapeIndex < 0) {
-					if (str.isNotEmpty()) msg += PlainText(str)
-					break
-				} else if (escapeIndex > 0) {
-					msg += PlainText(str.substring(0, escapeIndex))
-					str = str.substring(escapeIndex)
-					continue
-				} else {
-					if (str.startsWith("\u001b<Mention everyone>") && sender is Member) {
-						msg += AtAll
-					} else if (str.startsWith("\u001b<Mention ") && sender is Member && context is Group) {
-						val targetId = str.substringBefore('>').substringAfter(' ').toLongOrNull()
-						val target = if (targetId == null) sender else context.getMember(targetId)
-						if (target != null) {
-							msg += At(target)
-						} else {
-							println("A <Mention ...> in the following message to be sent is ignored, because such a member does not exist.")
-						}
-					} else if (str.startsWith("\u001b<Quote>")) {
-						if (msgSrc != null) {
-							msg += QuoteReply(msgSrc)
-						}
-					} else if (str.startsWith("\u001b<Begin quote ")) {
-						val ids = str.substring(14, str.indexOf(">")).split(",").map { it.toInt() }.toIntArray()
-						val contents = str.substring(str.indexOf(">") + 1, str.indexOf("\u001b<End>"))
-						str = str.substring(str.indexOf("\u001b<End>"))
-						if (msgSrc != null) {
-							val newMsgSrc = msgSrc.copyAmend {
-								this.originalMessage = contents.toPlainText().toMessageChain()
-								if (!this.ids.contentEquals(ids)) {
-									println("Not very good. The supplied ids in <Begin quote ...> doesn't match the message. This is not supported for the time being.")
-									this.internalIds = IntArray(ids.size) { 0 }
-									this.time = (System.currentTimeMillis() / 1000).toInt()
-								}
-								this.ids = ids
-							}
-							msg += QuoteReply(newMsgSrc)
-						}
-					} else if (str.startsWith("\u001b<Rich message::Xiaochengxu>")) {
-						msg = LightApp(str.substringAfter('>'))
-						str = ""
-					} else if (str.startsWith("\u001b<Rich message::Service JSON>")) {
-						msg = SimpleServiceMessage(1, str.substringAfter('>'))
-						str = ""
-					} else if (str.startsWith("\u001b<Rich message::Service XML>")) {
-						msg = SimpleServiceMessage(60, str.substringAfter('>'))
-						str = ""
-					} else if (str.startsWith("\u001b<Begin scope>")) {
-						val strategy = object : ForwardMessage.DisplayStrategy {
-							val title = str.substringBefore('\n').substringAfter('>')
-							override fun generateTitle(forward: RawForwardMessage): String {
-								return title
-							}
-						}
-						str = str.substringAfter('\n')
-						msg = buildForwardMessage(context) {
-							displayStrategy = strategy
-							100200300 named "鸽子 C" at 1582315452 says "咕咕咕"
-						}
-						str = ""
-					} else if (str.startsWith("\u001b<Emoticon ")) {
-						msg += Face(str.substringBefore('>').substringAfter(' ').toIntOrNull() ?: Face.KA_FEI)
-					} else if (str.startsWith("\u001b<Sticker::Dice ")) {
-						str.substringBefore('>').substringAfter(' ').toIntOrNull()?.let {
-							msg += Dice((it - 1) % 6 + 1)
-						}
-					} else if (str.startsWith("\u001b<Sticker::")) {
-						str.substringBefore('>').substringAfterLast(':').toIntOrNull()?.let {
-							val name = PlainText(str.substringAfter('>')).serializeToMiraiCode()
-							var marketFace = "[mirai:marketface:$it,$name]".deserializeMiraiCode()
-							if (marketFace.last() !is MarketFace) {
-								val classes = marketFace.joinToString { it.javaClass.name }
-								println("A Sticker cannot be constructed from mirai code (got $classes). Updated Mirai?")
-								marketFace = D2D2D(it, name).toMessageChain()
-							}
-							msg = marketFace
-							str = ""
-						}
+		} else if (str.startsWith("\u001b<Poke ")) {
+			val target: User? = when (val targetString = str.substringBefore('>').substringAfter(' ')) {
+				"sender" -> sender as? User
+				"self" -> sender.bot.asFriend
+				else -> {
+					val targetId = targetString.toLong()
+					when {
+						context is Group -> context[targetId]
+						sender.id == targetId && sender is User -> sender
+						sender.bot.id == targetId -> sender.bot.asFriend
+						else -> null
 					}
-					str = str.substringAfter('>', "")
 				}
 			}
-			context.sendMessage(msg)
+			try {
+				if (target != null) {
+					target.nudge().sendTo(context)
+					println("Poked ${target.id} successfully.")
+				} else {
+					println("Can't find who to poke.")
+				}
+			} catch (e: Throwable) {
+				replyOne(sender, context, messageSource, x, askaux("$x\u001b<Poke failure>"))
+			}
+		} else if (str.startsWith("\u001b<Context change ")) {
+			val algebraicTargetId = str.substringBefore('>').substringAfter("change ").toLongOrNull()
+			if (algebraicTargetId != null) {
+				context = (if (algebraicTargetId < 0) context.bot.getGroup(-algebraicTargetId) else context.bot.getFriend(algebraicTargetId)) ?: run {
+					println("An attempt of context change failed (target not found). Redirecting the following replies to the bot.")
+					context.bot.asFriend
+				}
+			}
+		} else if (str.isNotEmpty()) {
+			context.sendMessage(parseStringAsMessageChain(sender, context, messageSource, str))
 		}
 	}
 	resourceTypeFilenameList.forEach {
@@ -525,4 +493,98 @@ suspend fun replyOne(sender: Contact, context: Contact, msgSrc: MessageSource?, 
 		@Suppress("BlockingMethodInNonBlockingContext")
 		Files.delete(fs.getPath(it.second))
 	}
+}
+
+@MiraiExperimentalApi
+fun parseStringAsMessageChain(sender: Contact, context: Contact, messageSource: MessageSource?, s: String): Message {
+	var str = s.replace("\u001b<Revision>", revision.toString(), false)
+	var msg: Message = EmptyMessageChain
+	while (true) {
+		val escapeIndex = str.indexOf("\u001b<")
+		if (escapeIndex < 0) {
+			if (str.isNotEmpty()) msg += PlainText(str)
+			break
+		} else if (escapeIndex > 0) {
+			msg += PlainText(str.substring(0, escapeIndex))
+			str = str.substring(escapeIndex)
+			continue
+		} else {
+			if (str.startsWith("\u001b<Mention everyone>") && sender is Member) {
+				msg += AtAll
+			} else if (str.startsWith("\u001b<Mention ") && sender is Member && context is Group) {
+				val targetId = str.substringBefore('>').substringAfter(' ').toLongOrNull()
+				val target = if (targetId == null) sender else context.getMember(targetId)
+				if (target != null) {
+					msg += At(target)
+				} else {
+					println("A <Mention ...> in the following message to be sent is ignored, because such a member does not exist.")
+				}
+			} else if (str.startsWith("\u001b<Quote>")) {
+				if (messageSource != null) {
+					msg += QuoteReply(messageSource)
+				}
+			} else if (str.startsWith("\u001b<Begin quote ")) {
+				val ids = str.substring(14, str.indexOf(">")).split(",").map { it.toInt() }.toIntArray()
+				val contents = str.substring(str.indexOf(">") + 1, str.indexOf("\u001b<End>"))
+				str = str.substring(str.indexOf("\u001b<End>"))
+				if (messageSource != null) {
+					val newMsgSrc = messageSource.copyAmend {
+						this.originalMessage = contents.toPlainText().toMessageChain()
+						if (!this.ids.contentEquals(ids)) {
+							println("Not very good. The supplied ids in <Begin quote ...> doesn't match the message. This is not supported for the time being.")
+							this.internalIds = IntArray(ids.size) { 0 }
+							this.time = (System.currentTimeMillis() / 1000).toInt()
+						}
+						this.ids = ids
+					}
+					msg += QuoteReply(newMsgSrc)
+				}
+			} else if (str.startsWith("\u001b<Rich message::Xiaochengxu>")) {
+				msg = LightApp(str.substringAfter('>'))
+				str = ""
+			} else if (str.startsWith("\u001b<Rich message::Service JSON>")) {
+				msg = SimpleServiceMessage(1, str.substringAfter('>'))
+				str = ""
+			} else if (str.startsWith("\u001b<Rich message::Service XML>")) {
+				msg = SimpleServiceMessage(60, str.substringAfter('>'))
+				str = ""
+			} else if (str.startsWith("\u001b<Begin scope>")) {
+				val strategy = object : ForwardMessage.DisplayStrategy {
+					val title = str.substringBefore('\n').substringAfter('>')
+					override fun generateTitle(forward: RawForwardMessage): String {
+						return title
+					}
+				}
+				str = str.substringAfter('\n')
+				// 合并转发，完全没有做完！
+				msg = buildForwardMessage(context) {
+					displayStrategy = strategy
+					100200300 named "鸽子 C" at 1582315452 says "咕咕咕"
+				}
+				str = ""
+			} else if (str.startsWith("\u001b<Emoticon ")) {
+				msg += Face(str.substringBefore('>').substringAfter(' ').toIntOrNull() ?: Face.KA_FEI)
+			} else if (str.startsWith("\u001b<Sticker::Dice ")) {
+				str.substringBefore('>').substringAfter(' ').toIntOrNull()?.let {
+					msg += Dice((it - 1) % 6 + 1)
+				}
+			} else if (str.startsWith("\u001b<Sticker::")) {
+				str.substringBefore('>').substringAfterLast(':').toIntOrNull()?.let {
+					val name = PlainText(str.substringAfter('>')).serializeToMiraiCode()
+					val marketFace = "[mirai:marketface:$it,$name]".deserializeMiraiCode()
+					if (marketFace.last() !is MarketFace) {
+						val classes = marketFace.joinToString { it.javaClass.name }
+						println("A Sticker cannot be constructed from mirai code (got $classes).")
+					}
+					msg = marketFace
+					str = ""
+				}
+			} else if (str.startsWith('\u001b')) {
+				val seq = str.substring(1).substringBefore('>')
+				println("Unrecognized escape sequence ${seq}>.")
+			}
+			str = str.substringAfter('>', "")
+		}
+	}
+	return msg
 }

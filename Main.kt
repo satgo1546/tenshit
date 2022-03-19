@@ -17,47 +17,69 @@
 
 // Rev. 13
 // - 升级到Mirai 2.0-M1-1、Kotlin 1.4.21。
-// - tenshit-input.txt中支持Online、Offline、Relogin、群成员头衔变更、好友头像变更。
-// - tenshit-output.txt中支持更复杂的标记，如行内提及。
+// - tenshitaux-input.txt中支持Online、Offline、Relogin、群成员头衔变更、好友头像变更。
+// - tenshitaux-output.txt中支持更复杂的标记，如行内提及。
 
 // Rev. 14
 // - 升级到Mirai 2.5-M1、Kotlin 1.4.31。
-// - tenshit-output.txt中支持提及任意群成员、引用回复、骰子。
-// - tenshit-input.txt的格式与tenshit-output.txt更加统一，如由[咖啡]改为ESC<Face 60>。
+// - tenshitaux-output.txt中支持提及任意群成员、引用回复、骰子。
+// - tenshitaux-input.txt的格式与tenshit-output.txt更加统一，如由[咖啡]改为ESC<Face 60>。
 // - 主程序包名由io.github.tenshitmirai.MyLoader改为io.github.salenzo.tenshitmirai.MyLoader。
 
 // Rev. 15
 // - 升级到Mirai 2.6-M1。
-// - tenshit-input.txt中支持Mute、Unmute、引用回复、合并转发。
-// - tenshit-output.txt中支持老千骰子。
+// - tenshitaux-input.txt中支持Mute、Unmute、引用回复、合并转发。
+// - tenshitaux-output.txt中支持老千骰子。
 
 // Rev. 16
 // - 升级到Mirai 2.10.0、Kotlin 1.6.10、Shadow 7.1.2。
 // - tenshit-settings.txt增加到5行：可设置心跳策略，协议改用字符串表示。
-// - tenshit-input.txt中支持Resource::Image、Resource::Sticker、Resource::Audio、非骰子的Sticker。
-// - tenshit-output.txt中支持非骰子的Sticker。
-// - tenshit-output.txt中动作分隔符由ESC<Send>改为RS。
-// - tenshit-output.txt中删除了按名称发送表情的可能性，因为可以按ID发送表情，接收也已按ID。
-// - tenshit-input.txt和tenshit-output.txt中戳一戳动作的词汇由Nudge改为Poke。
+// - tenshitaux-input.txt中支持Resource::Image、Resource::Sticker、Resource::Audio、非骰子的Sticker。
+// - tenshitaux-output.txt中支持非骰子的Sticker。
+// - tenshitaux-output.txt中动作分隔符由ESC<Send>改为RS。
+// - tenshitaux-output.txt中删除了按名称发送表情的可能性，因为可以按ID发送表情，接收也已按ID。
+// - tenshitaux-input.txt和tenshitaux-output.txt中戳一戳动作的词汇由Nudge改为Poke。
 // - 借助mirai-silk-converter（需要FFmpeg）支持WAV、MP3、OGG、FLAC、Opus等各种音频格式作为语音消息发送到好友和群。
 // - 清理代码，构建脚本由Groovy DSL改为Kotlin DSL，减少class、var、硬编码索引substring的使用，不再设定独立应用程序不必要的包名。
 
 // Rev. 17
+// - 升级到Mirai 2.11.0-M1。
 // - tenshit-settings.txt增加到6行：可设置自动接受好友申请。
-// - tenshit-input.txt中支持Poke目标。
-// - tenshit-output.txt中支持Context change、Poke特定用户。
-// - 修正tenshit-input.txt中时间戳时区异常。
+// - tenshitaux-input.txt中支持Poke目标。
+// - tenshitaux-output.txt中支持Context change、Poke特定用户。
+// - 修正tenshitaux-input.txt中时间戳时区异常。
+
+// Rev. 18
+// - tenshitaux的超时由4秒改为100秒。
+// - tenshitaux-output.txt中支持Begin scope。
+// - 修正tenshitaux超时后进程没有被当即销毁的问题。修复前，这可能导致回复内容错乱。
+// - 修正tenshitaux-input.txt中时间戳时区异常（二度）。我观测到Mirai返回的时间戳是协调世界时。
+// - 修正tenshitaux-input.txt中出现Longwang的不可能性。
+// - 在独立线程等待tenshitaux的结果，因为等待进程结束的操作会阻塞线程。
+// - 不再在启动时强制要求tenshitaux运行结果状态码为零。
+
+// 修复笔记：mirai-silk-converter无法在Raspberry Pi Zero上运行，因为没有适用于ARMv6的预编译编码器。
+// 通过手工编译不带汇编加速的编码器并在发送语音前手工转换格式可以修复。
+// 参照：https://github.com/kn007/silk-v3-decoder
+//   make decoder encoder CDEFINES=NO_ASM
+//   ffmpeg -y -i a.mp3 -f s16le -ar 24000 -ac 1 a.pcm
+//   silk/encoder a.pcm b.slk -tencent
+
+// 修复笔记：tenshitaux运行时间过长时，会影响心跳收发。
+// 原因是Raspberry Pi Zero的处理器只有一个核心，故Kotlin协程线程池中线程数量是2。
+// 等待其他进程的方法来自Java，阻塞线程，令协程并行能力失效。为此专辟线程，今未再现堵塞之例。
+
+// 已知问题：合并转发消息无法在Raspberry Pi Zero上接收。
+// 原因是Java 9+ Server VM不支持ARMv6，Java 8被ktor抛弃，Mirai不知情，无法在运行时查找到子类的重载函数。
+// 可怕吗？是的，很可怕。过保质期的设备没有发挥余热的可能。
+
 
 import kotlinx.coroutines.*
-import net.mamoe.mirai.BotFactory
-import net.mamoe.mirai.LowLevelApi
-import net.mamoe.mirai.Mirai
-import net.mamoe.mirai.alsoLogin
+import net.mamoe.mirai.*
 import net.mamoe.mirai.contact.*
-import net.mamoe.mirai.contact.Contact.Companion.sendImage
 import net.mamoe.mirai.data.GroupHonorType
-import net.mamoe.mirai.event.GlobalEventChannel
 import net.mamoe.mirai.event.events.*
+import net.mamoe.mirai.event.globalEventChannel
 import net.mamoe.mirai.message.code.MiraiCode.deserializeMiraiCode
 import net.mamoe.mirai.message.data.*
 import net.mamoe.mirai.message.data.Image.Key.queryUrl
@@ -65,18 +87,12 @@ import net.mamoe.mirai.utils.BotConfiguration
 import net.mamoe.mirai.utils.ExternalResource.Companion.toExternalResource
 import net.mamoe.mirai.utils.MiraiExperimentalApi
 import java.io.File
-import java.nio.file.FileSystems
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.locks.ReentrantLock
-import kotlin.random.Random
 import kotlin.system.exitProcess
 
-const val revision = 17
-val seqSqr = ReentrantLock()
+const val revision = 18
 var exp = Regex("Tenshit")
 
 @Suppress("unused")
@@ -91,6 +107,7 @@ fun inspect(s: String): String {
 		.replace("\u000c", "\\f")
 		.replace("\u0007", "\\a")
 		.replace("\u001b", "\\e")
+		.replace("\u001e", "\\x1e")
 	return "\"${r}\""
 }
 
@@ -157,6 +174,7 @@ suspend fun buildMessageString(messageChain: MessageChain, context: Contact?): S
 		}
 		is ForwardMessage -> {
 			// 此接口尚未完全确定，建议用户暂时不要识别Begin scope。
+			// 2022-03-19：合并转发已经坏了，下载不到内容了（悲）
 			sb.appendLine("\u001b<Begin scope>${m.title}")
 			sb.append(m.nodeList.map {
 				"${it.senderId}\n${it.senderName}\n${it.time}\n${buildMessageString(it.messageChain, context)}"
@@ -168,32 +186,35 @@ suspend fun buildMessageString(messageChain: MessageChain, context: Contact?): S
 	return sb.toString()
 }
 
-fun runaux(): Int {
-	val pb = if (System.getProperty("os.name").lowercase().contains("win")) {
+// 在单一线程中执行tenshitaux和等待结果，自然排队。
+@OptIn(DelicateCoroutinesApi::class)
+val seqSqr = newSingleThreadContext("for_tenshitaux")
+// 不知道怎么关闭全局资源，就扔给操作系统吧。
+
+@Suppress("BlockingMethodInNonBlockingContext")
+suspend fun askaux(what: String): String = withContext(seqSqr) {
+	File("tenshitaux-input.txt").writeText(what, Charsets.UTF_8)
+	val p = if (System.getProperty("os.name").lowercase().contains("win")) {
 		ProcessBuilder("cmd", "/c", "tenshitaux")
 	} else {
 		ProcessBuilder("./tenshitaux")
-	}
-	pb.directory(null)
-	pb.redirectOutput(ProcessBuilder.Redirect.INHERIT)
-	pb.redirectError(ProcessBuilder.Redirect.INHERIT)
-	val p = pb.start()
-	if (!p.waitFor(4000 + revision.toLong(), TimeUnit.MILLISECONDS)) return Int.MAX_VALUE
-	return p.exitValue()
-}
-
-fun askaux(what: String): String {
-	return try {
-		seqSqr.lock()
-		File("tenshitaux-input.txt").writeText(what, Charsets.UTF_8)
-		runaux()
-		File("tenshitaux-output.txt").readText(Charsets.UTF_8)
-	} finally {
-		seqSqr.unlock()
+	}.directory(null)
+		.redirectOutput(ProcessBuilder.Redirect.INHERIT)
+		.redirectError(ProcessBuilder.Redirect.INHERIT)
+		.start()
+	if (p.waitFor(100000 + revision.toLong(), TimeUnit.MILLISECONDS)) {
+		if (p.exitValue() == 0) {
+			File("tenshitaux-output.txt").readText(Charsets.UTF_8)
+		} else {
+			"\u267b\ufe0f tenshitaux exit code ${p.exitValue()}"
+		}
+	} else {
+		p.destroyForcibly()
+		println("A tenshitaux process is terminated because it has been running for too long.")
+		"\u231b\ufe0f tenshitaux time out"
 	}
 }
 
-@OptIn(DelicateCoroutinesApi::class)
 @LowLevelApi
 @MiraiExperimentalApi
 fun main() {
@@ -229,12 +250,8 @@ fun main() {
 		println("Missing configuration items.")
 		exitProcess(1)
 	}
-	if (File("tenshitaux-input.txt").exists()) {
-		File("tenshitaux-input.txt").delete()
-	}
-	println("Try to run tenshitaux with no input. Should this lock or fail, I must die.")
-	if (runaux() != 0) {
-		println("It failed. Quitting.")
+	if (!File("tenshitaux").exists()) {
+		println("tenshitaux not found.")
 		exitProcess(1)
 	}
 	runBlocking {
@@ -245,89 +262,92 @@ fun main() {
 			redirectBotLogToDirectory(File("tenshit-mirai.log"))
 		}.alsoLogin()
 		println("Thank goodness, I am alive.")
-		GlobalEventChannel.subscribeAlways<MessageEvent> {
-			// 由于https://github.com/mamoe/mirai/issues/1850，禁止陌生人和临时会话触发消息事件。
-			if (this is StrangerMessageEvent || this is GroupTempMessageEvent) return@subscribeAlways
-			auxEvent(sender, subject, buildMessageString(message, subject), messageSource = source)
-		}
-		GlobalEventChannel.subscribeAlways<NudgeEvent> {
-			val from = this.from
-			if (from !is User) return@subscribeAlways // from is Bot
-			val subject: Contact = if (from is Member) from.group else from
-			auxEvent(from, subject, "\u001b<Poke ${target.id}>\n${action}\n${suffix}")
-		}
-		GlobalEventChannel.subscribeAlways<BotMuteEvent> {
-			auxEvent(group.botAsMember, group, "\u001b<Mute ${durationSeconds}>${operator.id}\n${operator.nameCardOrNick}")
-		}
-		GlobalEventChannel.subscribeAlways<BotUnmuteEvent> {
-			auxEvent(group.botAsMember, group, "\u001b<Unmute>${operator.id}\n${operator.nameCardOrNick}")
-		}
-		GlobalEventChannel.subscribeAlways<MemberMuteEvent> {
-			auxEvent(member, group, "\u001b<Mute ${durationSeconds}>${operatorOrBot.id}\n${operatorOrBot.nameCardOrNick}")
-		}
-		GlobalEventChannel.subscribeAlways<MemberUnmuteEvent> {
-			auxEvent(member, group, "\u001b<Unmute>${operatorOrBot.id}\n${operatorOrBot.nameCardOrNick}")
-		}
-		GlobalEventChannel.subscribeAlways<MemberJoinEvent> {
-			auxEvent(member, group, "\u001b<Member join>")
-		}
-		GlobalEventChannel.subscribeAlways<MemberLeaveEvent> {
-			auxEvent(member, group, "\u001b<Member quit>")
-		}
-		GlobalEventChannel.subscribeAlways<GroupNameChangeEvent> {
-			println("GroupNameChangeEvent. For debugging purposes:")
-			println(origin)
-			println(new)
-			auxEvent(operatorOrBot, group, "\u001b<Group name change>${new}", contextNameOverride = origin)
-		}
-		GlobalEventChannel.subscribeAlways<BotJoinGroupEvent> {
-			auxEvent(group.botAsMember, group, "\u001b<Join>")
-		}
-		GlobalEventChannel.subscribeAlways<BotOnlineEvent> {
-			auxEvent(bot.asFriend, bot.asFriend, "\u001b<Online>")
-		}
-		GlobalEventChannel.subscribeAlways<BotOfflineEvent> {
-			auxEvent(bot.asFriend, bot.asFriend, "\u001b<Offline>")
-		}
-		GlobalEventChannel.subscribeAlways<BotReloginEvent> {
-			auxEvent(bot.asFriend, bot.asFriend, "\u001b<Relogin>${cause?.message}\n${cause?.localizedMessage}")
-		}
-		GlobalEventChannel.subscribeAlways<MessageRecallEvent> {
-			val (sender, context) = when (this) {
-				is MessageRecallEvent.FriendRecall -> Pair(operator, operator)
-				is MessageRecallEvent.GroupRecall -> Pair(operatorOrBot, group)
+		with (globalEventChannel()) {
+			subscribeAlways<MessageEvent> {
+				// 由于https://github.com/mamoe/mirai/issues/1850，禁止陌生人和临时会话触发消息事件。
+				if (this is StrangerMessageEvent || this is GroupTempMessageEvent) return@subscribeAlways
+				auxEvent(sender, subject, buildMessageString(message, subject), messageSource = source)
 			}
-			auxEvent(sender, context, "\u001b<Delete>", messageIds = messageIds)
-		}
-		GlobalEventChannel.subscribeAlways<ImageUploadEvent.Failed> {
-			try {
-				target.sendMessage("\u267b\ufe0f ImageUploadEvent.Failed: ${message} (${errno})")
-			} catch (_: Throwable) {
+			subscribeAlways<NudgeEvent> {
+				val from = this.from
+				if (from !is User) return@subscribeAlways // from is Bot
+				val subject: Contact = if (from is Member) from.group else from
+				auxEvent(from, subject, "\u001b<Poke ${target.id}>\n${action}\n${suffix}")
+			}
+			subscribeAlways<BotMuteEvent> {
+				auxEvent(group.botAsMember, group, "\u001b<Mute ${durationSeconds}>${operator.id}\n${operator.nameCardOrNick}")
+			}
+			subscribeAlways<BotUnmuteEvent> {
+				auxEvent(group.botAsMember, group, "\u001b<Unmute>${operator.id}\n${operator.nameCardOrNick}")
+			}
+			subscribeAlways<MemberMuteEvent> {
+				auxEvent(member, group, "\u001b<Mute ${durationSeconds}>${operatorOrBot.id}\n${operatorOrBot.nameCardOrNick}")
+			}
+			subscribeAlways<MemberUnmuteEvent> {
+				auxEvent(member, group, "\u001b<Unmute>${operatorOrBot.id}\n${operatorOrBot.nameCardOrNick}")
+			}
+			subscribeAlways<MemberJoinEvent> {
+				auxEvent(member, group, "\u001b<Member join>")
+			}
+			subscribeAlways<MemberLeaveEvent> {
+				auxEvent(member, group, "\u001b<Member quit>")
+			}
+			subscribeAlways<GroupNameChangeEvent> {
+				println("GroupNameChangeEvent. For debugging purposes:")
+				println(origin)
+				println(new)
+				auxEvent(operatorOrBot, group, "\u001b<Group name change>${new}", contextNameOverride = origin)
+			}
+			subscribeAlways<BotJoinGroupEvent> {
+				auxEvent(group.botAsMember, group, "\u001b<Join>")
+			}
+			subscribeAlways<BotOnlineEvent> {
+				auxEvent(bot.asFriend, bot.asFriend, "\u001b<Online>")
+			}
+			subscribeAlways<BotOfflineEvent> {
+				auxEvent(bot.asFriend, bot.asFriend, "\u001b<Offline>")
+			}
+			subscribeAlways<BotReloginEvent> {
+				auxEvent(bot.asFriend, bot.asFriend, "\u001b<Relogin>${cause?.message}\n${cause?.localizedMessage}")
+			}
+			subscribeAlways<MessageRecallEvent> {
+				val (sender, context) = when (this) {
+					is MessageRecallEvent.FriendRecall -> Pair(operator, operator)
+					is MessageRecallEvent.GroupRecall -> Pair(operatorOrBot, group)
+				}
+				auxEvent(sender, context, "\u001b<Delete>", messageIds = messageIds)
+			}
+			subscribeAlways<ImageUploadEvent.Failed> {
+				try {
+					target.sendMessage("\u267b\ufe0f ImageUploadEvent.Failed: $message (${errno})")
+				} catch (_: Throwable) {
+				}
+			}
+			subscribeAlways<MemberSpecialTitleChangeEvent> {
+				auxEvent(member, group, "\u001b<Member badge>${origin}\n${new}")
+			}
+			subscribeAlways<NewFriendRequestEvent> {
+				print("NewFriendRequestEvent: ${inspect(message)}, ")
+				delay(514)
+				// 希望可以将好友验证问题作为消息对接到aux程序去，但是回复模型和正常消息不同，不太好做。
+				if (friendRequestAnswer.containsMatchIn(message)) {
+					accept()
+					println("accepted.")
+				} else {
+					println("suspended.")
+				}
+			}
+			subscribeAlways<FriendAvatarChangedEvent> {
+				auxEvent(friend, friend, "\u001b<Friend avatar>${friend.avatarUrl}")
+			}
+			subscribeAlways<MemberHonorChangeEvent> {
+				if (honorType != GroupHonorType.TALKATIVE) return@subscribeAlways
+				val rawData = Mirai.getRawGroupHonorListData(bot, group.id, GroupHonorType.TALKATIVE)
+				val dayCount = rawData?.currentTalkative?.dayCount ?: 0
+				auxEvent(member, group, "\u001b<Longwang ${dayCount}>")
 			}
 		}
-		GlobalEventChannel.subscribeAlways<MemberSpecialTitleChangeEvent> {
-			auxEvent(member, group, "\u001b<Member badge>${origin}\n${new}")
-		}
-		GlobalEventChannel.subscribeAlways<NewFriendRequestEvent> {
-			print("NewFriendRequestEvent: ${inspect(message)}, ")
-			delay(514)
-			// 希望可以将好友验证问题作为消息对接到aux程序去，但是回复模型和正常消息不同，不太好做。
-			if (friendRequestAnswer.containsMatchIn(message)) {
-				accept()
-				println("accepted.")
-			} else {
-				println("suspended.")
-			}
-		}
-		GlobalEventChannel.subscribeAlways<FriendAvatarChangedEvent> {
-			auxEvent(friend, friend, "\u001b<Friend avatar>${friend.avatarUrl}")
-		}
-		GlobalEventChannel.subscribeAlways<GroupTalkativeChangeEvent> {
-			val rawData = Mirai.getRawGroupHonorListData(bot, group.id, GroupHonorType.TALKATIVE)
-			val dayCount = rawData?.currentTalkative?.dayCount ?: 0
-			auxEvent(now, group, "\u001b<Longwang ${dayCount}>")
-		}
-		GlobalScope.launch {
+		launch {
 			println("Yet another coroutine has been started as expected. What would happen?")
 			while (true) {
 				delay(49000)
@@ -340,9 +360,10 @@ fun main() {
 					}
 					File(".").listFiles()?.forEach { file ->
 						if (file.name.startsWith("tenshit-periodic-")) {
-							file.nameWithoutExtension.substringAfter("periodic-").toLongOrNull()?.let {
-								// The async coroutine is dealing with periodic event ${it}.
-								val sender = (if (it < 0) miraiBot.getGroup(-it) else miraiBot.getFriend(it)) ?: return@let
+							// The async coroutine is dealing with periodic event ${it}.
+							val senderId = file.nameWithoutExtension.substringAfter("periodic-").toLongOrNull()
+							val sender = getContactFromAlgebraicId(miraiBot, senderId)
+							if (sender != null) {
 								auxEvent(sender, sender, "\u001b<Periodic event>")
 								delay(114)
 							}
@@ -370,6 +391,11 @@ fun main() {
 	}
 }
 
+fun getContactFromAlgebraicId(bot: Bot, algebraicId: Long?): Contact? = algebraicId?.let {
+	if (it == 0L || it == bot.id) return@let bot.asFriend
+	if (it < 0) bot.getGroup(-it) else bot.getFriend(it)
+}
+
 @MiraiExperimentalApi
 suspend fun auxEvent(
 	sender: Contact,
@@ -391,8 +417,7 @@ suspend fun auxEvent(
 	try {
 		val (algebraicSenderId, senderName) = contactInfo(sender)
 		val (algebraicContextId, contextName) = contactInfo(context)
-		// 转换服务器时间（UTC+8）到协调世界时。
-		val time = messageSource?.time?.let { it + TimeUnit.HOURS.toSeconds(8) } ?: 0
+		val time = messageSource?.time ?: 0
 		val header = "${algebraicSenderId}\n${senderName}\n" +
 			"${algebraicContextId}\n${contextNameOverride ?: contextName}\n" +
 			"${time}\n" +
@@ -416,24 +441,8 @@ suspend fun auxEvent(
 @MiraiExperimentalApi
 suspend fun replyOne(sender: Contact, ctx: Contact, messageSource: MessageSource?, x: String, text: String) {
 	var context = ctx
-	// 此中Int为类型：1表图片，2表语音。
-	val resourceTypeFilenameList = mutableListOf<Pair<Int, String>>()
-	val fs = FileSystems.getDefault()
-	for ((ext, type) in listOf(
-		Pair("png", 1), Pair("jpg", 1), Pair("jpeg", 1), Pair("gif", 1), Pair("bmp", 1),
-		Pair("amr", 2), Pair("slk", 2), Pair("silk", 2), Pair("wav", 2), Pair("wave", 2), Pair("mp3", 2),
-		Pair("ogg", 2), Pair("flac", 2), Pair("opus", 2),
-	)) {
-		val filename = "tenshitaux-output.${ext}"
-		if (File(filename).exists()) {
-			val newFilename = "${Random.nextLong()}.${ext}"
-			@Suppress("BlockingMethodInNonBlockingContext")
-			Files.move(fs.getPath(filename), fs.getPath(newFilename), StandardCopyOption.REPLACE_EXISTING)
-			if (!File(newFilename).exists()) throw Exception("An resource file disappeared immediately after being renamed. Why?")
-			resourceTypeFilenameList.add(Pair(type, newFilename))
-		}
-	}
-	for (str in text.split('\u001e')) {
+	var str = text
+	while (str.isNotEmpty()) {
 		if (str.startsWith("\u001b<Callback after ")) {
 			str.substringBefore('>').substringAfter("after ").toLongOrNull()?.let {
 				println("Now scheduling a ${it}ms timer.")
@@ -467,49 +476,71 @@ suspend fun replyOne(sender: Contact, ctx: Contact, messageSource: MessageSource
 			}
 		} else if (str.startsWith("\u001b<Context change ")) {
 			val algebraicTargetId = str.substringBefore('>').substringAfter("change ").toLongOrNull()
-			if (algebraicTargetId != null) {
-				context = (if (algebraicTargetId < 0) context.bot.getGroup(-algebraicTargetId) else context.bot.getFriend(algebraicTargetId)) ?: run {
-					println("An attempt of context change failed (target not found). Redirecting the following replies to the bot.")
-					context.bot.asFriend
+			context = getContactFromAlgebraicId(context.bot, algebraicTargetId) ?: run {
+				println("An attempt of context change failed (target not found). Redirecting the following replies to the bot.")
+				context.bot.asFriend
+			}
+		} else if (str.startsWith("\u001b<Resource::Audio ")) {
+			if (context is AudioSupported) {
+				File(str.substringBefore('>').substringAfter(' ')).toExternalResource("silk").use {
+					context.uploadAudio(it).sendTo(context)
 				}
 			}
 		} else if (str.isNotEmpty()) {
-			context.sendMessage(parseStringAsMessageChain(sender, context, messageSource, str))
+			val (msg, newStr) = parseStringAsMessageChain(sender, context, messageSource, str)
+			context.sendMessage(msg)
+			str = newStr
+			continue
 		}
-	}
-	resourceTypeFilenameList.forEach {
-		// it.first为类型，it.second为文件名。
-		when (it.first) {
-			1 -> context.sendImage(File(it.second))
-			2 -> {
-				if (context is AudioSupported) {
-					File(it.second).toExternalResource("silk").use {
-						context.uploadAudio(it).sendTo(context)
-					}
-				}
-			}
-			else -> println("Unknown resource type ${it.first}. This should not happen and must be a bug in Tenshit.")
-		}
-		@Suppress("BlockingMethodInNonBlockingContext")
-		Files.delete(fs.getPath(it.second))
+		str = str.substringAfter('\u001e', "")
 	}
 }
 
 @MiraiExperimentalApi
-fun parseStringAsMessageChain(sender: Contact, context: Contact, messageSource: MessageSource?, s: String): Message {
+suspend fun parseStringAsMessageChain(sender: Contact, context: Contact, messageSource: MessageSource?, s: String): Pair<Message, String> {
 	var str = s.replace("\u001b<Revision>", revision.toString(), false)
 	var msg: Message = EmptyMessageChain
+	val forwardMessageStack = mutableListOf<ForwardMessageBuilder>()
+	var forwardMessageMetadataPending = false
+	var forwardMessageSenderId = context.bot.id
+	var forwardMessageSenderName = context.bot.nameCardOrNick
+	var forwardMessageTime: Int = messageSource?.time ?: (System.currentTimeMillis() / 1000L).toInt()
 	while (true) {
-		val escapeIndex = str.indexOf("\u001b<")
+		val escapeIndex = str.indexOfAny(listOf("\u001b<", "\u001e"))
 		if (escapeIndex < 0) {
 			if (str.isNotEmpty()) msg += PlainText(str)
+			str = ""
 			break
 		} else if (escapeIndex > 0) {
-			msg += PlainText(str.substring(0, escapeIndex))
-			str = str.substring(escapeIndex)
+			if (forwardMessageStack.isNotEmpty() && forwardMessageMetadataPending) {
+				val invalid = "Invalid tenshitaux-output.txt!"
+				forwardMessageMetadataPending = false
+				forwardMessageSenderId = str.substringBefore('\n', invalid).toLong()
+				if (forwardMessageSenderId == 0L) forwardMessageSenderId = context.bot.id
+				str = str.substringAfter('\n')
+				forwardMessageSenderName = str.substringBefore('\n', "undefined")
+				str = str.substringAfter('\n')
+				forwardMessageTime = str.substringBefore('\n', invalid).toInt()
+				str = str.substringAfter('\n')
+			} else {
+				msg += PlainText(str.substring(0, escapeIndex))
+				str = str.substring(escapeIndex)
+			}
 			continue
 		} else {
-			if (str.startsWith("\u001b<Mention everyone>") && sender is Member) {
+			if (str.startsWith('\u001e')) {
+				str = str.substring(1)
+				if (forwardMessageStack.isEmpty()) {
+					break
+				} else {
+					if (!msg.isContentEmpty()) {
+						forwardMessageStack.last().add(forwardMessageSenderId, forwardMessageSenderName, msg, forwardMessageTime)
+					}
+					msg = EmptyMessageChain
+					forwardMessageMetadataPending = true
+				}
+				continue
+			} else if (str.startsWith("\u001b<Mention everyone>") && sender is Member) {
 				msg += AtAll
 			} else if (str.startsWith("\u001b<Mention ") && sender is Member && context is Group) {
 				val targetId = str.substringBefore('>').substringAfter(' ').toLongOrNull()
@@ -548,20 +579,28 @@ fun parseStringAsMessageChain(sender: Contact, context: Contact, messageSource: 
 			} else if (str.startsWith("\u001b<Rich message::Service XML>")) {
 				msg = SimpleServiceMessage(60, str.substringAfter('>'))
 				str = ""
-			} else if (str.startsWith("\u001b<Begin scope>")) {
+			} else if (str.startsWith("\u001b<Begin scope ")) {
+				val scopeContextId = str.substringBefore('>').substringAfter("scope ").toLongOrNull()
+				val scopeContext = getContactFromAlgebraicId(context.bot, scopeContextId) ?: context.bot.asFriend
 				val strategy = object : ForwardMessage.DisplayStrategy {
-					val title = str.substringBefore('\n').substringAfter('>')
-					override fun generateTitle(forward: RawForwardMessage): String {
-						return title
-					}
+					val preamble = str.substringBefore('\u001e', "").substringAfter('>').split('\n')
+					override fun generateTitle(forward: RawForwardMessage) = preamble.first()
+					override fun generatePreview(forward: RawForwardMessage) =
+						if (preamble.size < 2) preamble else preamble.subList(1, preamble.size - 1)
+					override fun generateSummary(forward: RawForwardMessage) = preamble.last()
 				}
-				str = str.substringAfter('\n')
-				// 合并转发，完全没有做完！
-				msg = buildForwardMessage(context) {
+				str = '\u001e' + str.substringAfter('\u001e')
+				forwardMessageStack.add(ForwardMessageBuilder(scopeContext).apply {
 					displayStrategy = strategy
-					100200300 named "鸽子 C" at 1582315452 says "咕咕咕"
-				}
-				str = ""
+				})
+				continue
+			} else if (str.startsWith("\u001b<End>")) {
+				forwardMessageStack.removeLastOrNull()?.let {
+					if (!msg.isContentEmpty()) {
+						it.add(forwardMessageSenderId, forwardMessageSenderName, msg, forwardMessageTime)
+					}
+					msg = it.build()
+				} ?: println("Nothing to <End>.")
 			} else if (str.startsWith("\u001b<Emoticon ")) {
 				msg += Face(str.substringBefore('>').substringAfter(' ').toIntOrNull() ?: Face.KA_FEI)
 			} else if (str.startsWith("\u001b<Sticker::Dice ")) {
@@ -579,12 +618,21 @@ fun parseStringAsMessageChain(sender: Contact, context: Contact, messageSource: 
 					msg = marketFace
 					str = ""
 				}
+			} else if (str.startsWith("\u001b<Resource::Image ")) {
+				File(str.substringBefore('>').substringAfter(' ')).toExternalResource().use {
+					msg += context.uploadImage(it)
+				}
 			} else if (str.startsWith('\u001b')) {
 				val seq = str.substring(1).substringBefore('>')
 				println("Unrecognized escape sequence ${seq}>.")
+			} else {
+				println("Control should not reach here. This is a bug in Tenshit.")
 			}
-			str = str.substringAfter('>', "")
+			str = str.substringAfter('>', "\u267b\ufe0f Missing '>'?")
 		}
 	}
-	return msg
+	if (forwardMessageStack.isNotEmpty()) {
+		println("Missing <End> for ${forwardMessageStack.size} <Begin scope>(s).")
+	}
+	return Pair(msg, str)
 }

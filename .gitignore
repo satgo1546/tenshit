@@ -3,10 +3,20 @@
 *.zip
 *.tar.gz
 *.tar.xz
-*.rar
 hs_err_pid*
 replay_pid*
+# go.sum should generally be checked in; I ignore it in order to stay minimal.
+go.sum
+/tenshit
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
 
 tenshit-settings.txt
 *.log
 TenshitLog.csv
+device.json
+session.token

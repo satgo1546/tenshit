@@ -1,5 +1,5 @@
 plugins {
-	kotlin("jvm") version "1.6.10"
+	kotlin("jvm") version "1.6.20"
 	application
 	id("com.github.johnrengelman.shadow") version "7.1.2"
 }
@@ -10,10 +10,10 @@ repositories {
 
 dependencies {
 	// 开发时使用mirai-core-api，运行时提供mirai-core。
-	api(platform("net.mamoe:mirai-bom:2.10.0"))
+	api(platform("net.mamoe:mirai-bom:2.11.0-M1"))
 	api("net.mamoe:mirai-core-api") // 编译代码使用
 	runtimeOnly("net.mamoe:mirai-core") // 运行时使用
-	api("net.mamoe:mirai-silk-converter:0.0.5") // 自动将不支持的音频格式转换为受支持的音频格式
+	//api("net.mamoe:mirai-silk-converter:0.0.5") // 自动将不支持的音频格式转换为受支持的音频格式
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {

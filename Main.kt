@@ -73,6 +73,9 @@
 // 原因是Java 9+ Server VM不支持ARMv6，Java 8被ktor抛弃，Mirai不知情，无法在运行时查找到子类的重载函数。
 // 可怕吗？是的，很可怕。过保质期的设备没有发挥余热的可能。
 
+// Rev. 19
+// - 修正tenshitaux超时后进程树没有被销毁的问题。
+// - 修正tenshitaux-output.txt中连续的RS产生message is empty异常。
 
 import kotlinx.coroutines.*
 import net.mamoe.mirai.*
@@ -92,7 +95,7 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
-const val revision = 18
+const val revision = 19
 var exp = Regex("Tenshit")
 
 @Suppress("unused")
@@ -194,14 +197,15 @@ val seqSqr = newSingleThreadContext("for_tenshitaux")
 @Suppress("BlockingMethodInNonBlockingContext")
 suspend fun askaux(what: String): String = withContext(seqSqr) {
 	File("tenshitaux-input.txt").writeText(what, Charsets.UTF_8)
-	val p = if (System.getProperty("os.name").lowercase().contains("win")) {
-		ProcessBuilder("cmd", "/c", "tenshitaux")
-	} else {
-		ProcessBuilder("./tenshitaux")
-	}.directory(null)
+	val win = System.getProperty("os.name").lowercase().contains("win")
+	val pb = ProcessBuilder().directory(null)
 		.redirectOutput(ProcessBuilder.Redirect.INHERIT)
 		.redirectError(ProcessBuilder.Redirect.INHERIT)
-		.start()
+	val p = if (win) {
+		pb.command("cmd", "/c", "tenshitaux")
+	} else {
+		pb.command("timeout", "--signal=KILL", "100", "./tenshitaux")
+	}.start()
 	if (p.waitFor(100000 + revision.toLong(), TimeUnit.MILLISECONDS)) {
 		if (p.exitValue() == 0) {
 			File("tenshitaux-output.txt").readText(Charsets.UTF_8)
@@ -209,8 +213,12 @@ suspend fun askaux(what: String): String = withContext(seqSqr) {
 			"\u267b\ufe0f tenshitaux exit code ${p.exitValue()}"
 		}
 	} else {
-		p.destroyForcibly()
-		println("A tenshitaux process is terminated because it has been running for too long.")
+		// p.destroy()和p.destroyForcibly()不终结子进程。Java开发人员可能认为这是常识而为将其写入文档。
+		// pkill --parent选项不终结孙进程。
+		if (win) {
+			pb.command("taskkill", "/f", "/t", "/pid", p.pid().toString()).start().waitFor()
+		}
+		println("A tenshitaux process has been running for too long.")
 		"\u231b\ufe0f tenshitaux time out"
 	}
 }
@@ -488,7 +496,9 @@ suspend fun replyOne(sender: Contact, ctx: Contact, messageSource: MessageSource
 			}
 		} else if (str.isNotEmpty()) {
 			val (msg, newStr) = parseStringAsMessageChain(sender, context, messageSource, str)
-			context.sendMessage(msg)
+			if (!msg.isContentEmpty()) {
+				context.sendMessage(msg)
+			}
 			str = newStr
 			continue
 		}
@@ -520,7 +530,9 @@ suspend fun parseStringAsMessageChain(sender: Contact, context: Contact, message
 				str = str.substringAfter('\n')
 				forwardMessageSenderName = str.substringBefore('\n', "undefined")
 				str = str.substringAfter('\n')
-				forwardMessageTime = str.substringBefore('\n', invalid).toInt()
+				str.substringBefore('\n', invalid).toInt().let {
+					if (it < 114514) forwardMessageTime += it else forwardMessageTime = it
+				}
 				str = str.substringAfter('\n')
 			} else {
 				msg += PlainText(str.substring(0, escapeIndex))
